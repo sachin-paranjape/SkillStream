@@ -1,0 +1,7 @@
+#Environments and Secrets
+.env
+
+#Data
+data/
+*.csv
+
