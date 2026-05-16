@@ -1,37 +1,71 @@
-import os
-
-from fastapi import FastAPI
-import pandas as pd
-from config import DATA_PATH
+from fastapi import FastAPI, Query
+from database import (
+    init_db,
+    record_submission,
+    get_leaderboard,
+    get_user_points,
+    get_user_rank,
+)
 from models import Submission
-from bkt_engine import audit_mastery
+from bkt_engine import audit_mastery, get_bkt_state
 from ai_engine import get_hybrid_mcq, get_dual_feedback
 
 app = FastAPI()
+init_db()
 
 @app.get("/mastery/report/{user_id}")
 async def mastery_report(user_id: int):
-    skills = ["Verbal Ability", "Aptitude", "Data Structures"]
-    return {s: await audit_mastery(user_id, s) for s in skills}
+    valid_skills = ["Verbal Ability", "Aptitude", "Data Structures"]
+    report = {}
+    for skill in valid_skills:
+        state = get_bkt_state(user_id, skill)
+        report[skill] = {
+            "mastery": state["mastery"],
+            "level": state["level"],
+            "attempts": state["attempts"],
+        }
+    return report
 
 @app.get("/recommend/{user_id}")
-async def recommend(user_id: int):
-    skills = ["Verbal Ability", "Aptitude", "Data Structures"]
-    report = {s: await audit_mastery(user_id, s) for s in skills}
-    weakest = min(report, key=report.get)
-    score = report[weakest]
-    
-    difficulty = "Easy" if score < 0.4 else "Hard" if score < 0.7 else "Expert"
-    use_cloud = (difficulty == "Expert") or (weakest == "Data Structures")
-    
-    mcq = await get_hybrid_mcq(weakest, difficulty, score, use_cloud)
-    needs_explanation = not (difficulty == "Easy" and weakest in ["Verbal Ability", "Aptitude"])
-    
+async def recommend(user_id: int, skill: str | None = None):
+    valid_skills = ["Verbal Ability", "Aptitude", "Data Structures"]
+    states = {s: get_bkt_state(user_id, s) for s in valid_skills}
+
+    if skill and skill in valid_skills:
+        chosen_skill = skill
+    else:
+        chosen_skill = min(states, key=lambda s: states[s]["mastery"])
+
+    state = states[chosen_skill]
+    score = state["mastery"]
+    attempts = state["attempts"]
+
+    if score < 0.35:
+        difficulty = "Easy"
+    elif score < 0.55:
+        difficulty = "Medium"
+    elif score < 0.80:
+        difficulty = "Hard"
+    else:
+        difficulty = "Expert"
+
+    use_cloud = difficulty == "Expert" or chosen_skill == "Data Structures"
+    mcq = await get_hybrid_mcq(chosen_skill, difficulty, score, use_cloud)
+    needs_explanation = difficulty in ["Hard", "Expert"]
+
     return {
-        "skill": weakest,
+        "skill": chosen_skill,
         "mastery": score,
+        "user_level": state["level"],
         "difficulty": difficulty,
         "needs_explanation": needs_explanation,
+        "probabilities": {
+            "knows": state["p_known"],
+            "answers_correct": state["p_correct"],
+            "knows_but_missed": state["p_known_but_missed"],
+            "guessed": state["p_guessed"],
+            "unknown_and_wrong": state["p_unknown_and_wrong"],
+        },
         "question": {
             "question": mcq.get("question", "Question missing?"),
             "options": {
@@ -48,14 +82,40 @@ async def recommend(user_id: int):
 @app.post("/submit")
 async def submit(sub: Submission):
     is_correct = sub.selected_option.upper() == sub.correct_option.upper()
-    df = pd.DataFrame([[sub.user_id, sub.skill, 1 if is_correct else 0]], columns=['user_id','skill_name','correct'])
-    should_write_header = not os.path.exists(DATA_PATH) or os.path.getsize(DATA_PATH) == 0
-    df.to_csv(DATA_PATH, mode='a', header=should_write_header, index=False)
-    
+    record_submission(
+        user_id=sub.user_id,
+        user_name=sub.user_name,
+        skill_name=sub.skill,
+        difficulty=sub.difficulty,
+        question_text=sub.question_text,
+        selected_option=sub.selected_option,
+        selected_option_text=sub.selected_option_text,
+        correct_option=sub.correct_option,
+        correct_option_text=sub.correct_option_text,
+        explanation_text=sub.explanation,
+        is_correct=is_correct,
+    )
+
     feedback = await get_dual_feedback(sub)
     return {
         "is_correct": is_correct,
         "new_mastery": await audit_mastery(sub.user_id, sub.skill),
+        "difficulty": sub.difficulty,
+        "points": get_user_points(sub.user_id),
+        "correct_option": sub.correct_option,
+        "correct_option_text": sub.correct_option_text,
         "mentor_feedback": feedback.get("mentor"),
         "expert_feedback": feedback.get("expert")
     }
+
+@app.get("/leaderboard")
+async def leaderboard(
+    limit: int = Query(10, ge=1, le=50),
+    user_id: int | None = None,
+    skill: str | None = None,
+):
+    board = get_leaderboard(limit, skill_name=skill)
+    response = {"leaderboard": board}
+    if user_id is not None:
+        response["user_rank"] = get_user_rank(user_id)
+    return response

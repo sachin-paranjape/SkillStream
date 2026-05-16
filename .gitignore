@@ -1,8 +1,10 @@
 #Environments and Secrets
 .env
+skillvenv/
 
 #Data
 data/
 *.csv
 __pycache__/
+Placement_Interview_Quiz_Questions.csv
 
