@@ -98,8 +98,9 @@ if 'current_data' in st.session_state:
                 "skill": data['skill'],
                 "selected_option": choice,
                 "correct_option": q['correct_option'],
-                "explanation_text": explanation,
-                "difficulty": data['difficulty']
+                "question_text": q['question'], # <--- NEW
+                "selected_option_text": options[choice], # <--- NEW
+                "correct_option_text": options[q['correct_option']] # <--- NEW
             }
             
             with st.spinner("Consulting the Mentor & Expert..."):
