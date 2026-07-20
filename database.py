@@ -129,6 +129,41 @@ def record_submission(
     conn.close()
 
 
+def get_seen_question_texts(
+    user_id: int,
+    skill_name: str,
+    difficulty: str | None = None,
+) -> set[str]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    if difficulty:
+        cursor.execute(
+            """
+            SELECT DISTINCT question_text
+            FROM submissions
+            WHERE user_id = ?
+              AND skill_name = ?
+              AND difficulty = ?
+              AND question_text IS NOT NULL
+            """,
+            (user_id, skill_name, difficulty),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT DISTINCT question_text
+            FROM submissions
+            WHERE user_id = ?
+              AND skill_name = ?
+              AND question_text IS NOT NULL
+            """,
+            (user_id, skill_name),
+        )
+    rows = cursor.fetchall()
+    conn.close()
+    return {str(row[0]).strip() for row in rows if str(row[0]).strip()}
+
+
 def get_leaderboard(limit: int = 20, skill_name: str | None = None) -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()

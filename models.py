@@ -8,7 +8,7 @@ class Submission(BaseModel):
     difficulty: str
     selected_option: str
     correct_option: str
-    # Added these to fix the "Template Mentor" issue
+    
     question_text: str
     selected_option_text: str
     correct_option_text: str

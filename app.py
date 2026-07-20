@@ -128,12 +128,18 @@ if 'current_data' in st.session_state:
     data = st.session_state.current_data
     q = data['question']
     # Show a small badge when the question is explicitly contextualized to a use case
-    if q.get('use_case') or q.get('use_case_description'):
+    if q.get('context') or q.get('anchor_fact') or q.get('use_case') or q.get('use_case_description'):
         st.markdown("**Scenario-based question** — Context provided")
     
     with st.container(border=True):
         st.markdown(f"**Targeting:** `{data['skill']}` | **Difficulty:** `{data['difficulty']}`")
-        st.subheader(q['question'])
+        display_question = q['question']
+        if display_question.startswith("Context:") and "\n\n" in display_question:
+            context_text, display_question = display_question.split("\n\n", 1)
+            st.info(context_text)
+        elif q.get('context'):
+            st.info(f"Context: {q['context']}")
+        st.subheader(display_question)
         
         # MCQ Options
         options = q['options']
@@ -146,7 +152,7 @@ if 'current_data' in st.session_state:
             explanation = st.text_area("🧠 Socratic Insight: Explain your logic briefly:", 
                                       placeholder="Why is this the correct logical path?")
         else:
-            st.write("✨ **Snappy Check:** No explanation needed for this verbal level.")
+            st.write("✨ **Snappy Check:** No explanation needed for this level.")
             explanation = "N/A - Quick Check"
         # ---------------------------------
 
@@ -184,8 +190,7 @@ if 'last_result' in st.session_state:
         st.markdown(f"**Correct answer:** {res.get('correct_option')} — {res.get('correct_option_text')} ")
 
     expert_text = res.get('expert_feedback')
-    # Show expert if model returned one OR when the student answered correctly at Easy/Medium
-    show_expert = bool(expert_text) or (res.get('is_correct') and res.get('difficulty') in ["Easy", "Medium"]) 
+    show_expert = bool(expert_text)
     if show_expert:
         col1, col2 = st.columns(2)
         with col1:
@@ -199,8 +204,14 @@ if 'last_result' in st.session_state:
         st.markdown("### 🧘 The Mentor")
         st.info(res['mentor_feedback'] or "Review the correct answer and the explanation carefully.")
     
-    st.metric("New Mastery Score", f"{res['new_mastery']*100:.1f}%", 
-              delta=f"{(res['new_mastery'] - 0.1)*100:.1f}%" if res['is_correct'] else None)
+    mastery_delta = res.get("mastery_delta")
+    if mastery_delta is None and res.get("previous_mastery") is not None:
+        mastery_delta = res["new_mastery"] - res["previous_mastery"]
+    st.metric(
+        "New Mastery Score",
+        f"{res['new_mastery']*100:.1f}%",
+        delta=f"{mastery_delta*100:.1f}%" if mastery_delta is not None else None,
+    )
     if res.get("points") is not None:
         st.metric("Total Points", f"{int(res['points'])}")
     

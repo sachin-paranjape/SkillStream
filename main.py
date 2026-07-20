@@ -5,6 +5,7 @@ from database import (
     get_leaderboard,
     get_user_points,
     get_user_rank,
+    get_seen_question_texts,
 )
 from models import Submission
 from bkt_engine import audit_mastery, get_bkt_state
@@ -50,7 +51,8 @@ async def recommend(user_id: int, skill: str | None = None):
         difficulty = "Expert"
 
     use_cloud = difficulty == "Expert" or chosen_skill == "Data Structures"
-    mcq = await get_hybrid_mcq(chosen_skill, difficulty, score, use_cloud)
+    seen_question_texts = get_seen_question_texts(user_id, chosen_skill)
+    mcq = await get_hybrid_mcq(chosen_skill, difficulty, score, use_cloud, seen_question_texts)
     needs_explanation = difficulty in ["Hard", "Expert"]
 
     return {
@@ -75,13 +77,18 @@ async def recommend(user_id: int, skill: str | None = None):
                 "D": mcq.get("option_D", "N/A")
             },
             "correct_option": mcq.get("correct_option", "A"),
-            "logic_explanation": mcq.get("logic_explanation", "")
+            "logic_explanation": mcq.get("logic_explanation", ""),
+            "context": mcq.get("context", ""),
+            "anchor_fact": mcq.get("anchor_fact", ""),
+            "use_case": mcq.get("use_case", ""),
+            "use_case_description": mcq.get("use_case_description", "")
         }
     }
 
 @app.post("/submit")
 async def submit(sub: Submission):
     is_correct = sub.selected_option.upper() == sub.correct_option.upper()
+    previous_mastery = get_bkt_state(sub.user_id, sub.skill)["mastery"]
     record_submission(
         user_id=sub.user_id,
         user_name=sub.user_name,
@@ -97,9 +104,12 @@ async def submit(sub: Submission):
     )
 
     feedback = await get_dual_feedback(sub)
+    new_mastery = await audit_mastery(sub.user_id, sub.skill)
     return {
         "is_correct": is_correct,
-        "new_mastery": await audit_mastery(sub.user_id, sub.skill),
+        "previous_mastery": previous_mastery,
+        "new_mastery": new_mastery,
+        "mastery_delta": round(new_mastery - previous_mastery, 3),
         "difficulty": sub.difficulty,
         "points": get_user_points(sub.user_id),
         "correct_option": sub.correct_option,

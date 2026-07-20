@@ -72,7 +72,7 @@ def get_bkt_state(user_id: int, skill: str) -> dict:
         return {
             "attempts": attempts,
             "correct_count": correct_count,
-            "mastery": round(float(min(0.95, p_known)), 3),
+            "mastery": round(float(min(0.99, p_known)), 3),
             "level": _mastery_to_level(p_known),
             "p_known": round(float(p_known), 3),
             "p_correct": round(float(p_correct), 3),
