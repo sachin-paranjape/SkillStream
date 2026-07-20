@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import bcrypt
 from datetime import datetime
 from typing import List, Dict, Any
 
@@ -9,23 +10,43 @@ os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 
 def get_connection() -> sqlite3.Connection:
+    """Returns a SQLite connection configured with row_factory."""
     conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db() -> None:
+    """Initializes SQLite schema for users, submissions, and mastery with demo user seeding."""
     conn = get_connection()
     cursor = conn.cursor()
+    
+    # Users table for Auth
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            user_name TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            email TEXT UNIQUE,
+            password_hash TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
+    
+    # Safely migrate existing users table if columns are missing from older schema
+    cursor.execute("PRAGMA table_info(users)")
+    user_cols = [row[1] for row in cursor.fetchall()]
+    if "username" not in user_cols:
+        cursor.execute("ALTER TABLE users ADD COLUMN username TEXT")
+    if "email" not in user_cols:
+        cursor.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    if "password_hash" not in user_cols:
+        cursor.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+    if "user_name" in user_cols:
+        cursor.execute("UPDATE users SET username = user_name WHERE username IS NULL OR username = ''")
+
+    # Submissions table for tracking practice questions
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS submissions (
@@ -46,33 +67,55 @@ def init_db() -> None:
         )
         """
     )
+    
+    # Ensure columns in submissions
     cursor.execute("PRAGMA table_info(submissions)")
-    columns = [row[1] for row in cursor.fetchall()]
-    if "difficulty" not in columns:
+    sub_cols = [row[1] for row in cursor.fetchall()]
+    if "difficulty" not in sub_cols:
         cursor.execute("ALTER TABLE submissions ADD COLUMN difficulty TEXT")
-    if "explanation_text" not in columns:
+    if "explanation_text" not in sub_cols:
         cursor.execute("ALTER TABLE submissions ADD COLUMN explanation_text TEXT")
+        
+    # Seed demo user (admin / admin123) if not present
+    cursor.execute("SELECT user_id FROM users WHERE username = ? OR email = ?", ("admin", "admin@skillstream.com"))
+    if cursor.fetchone() is None:
+        hashed_password = bcrypt.hashpw("admin123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        now_str = datetime.utcnow().isoformat()
+        if "user_name" in user_cols:
+            cursor.execute(
+                "INSERT INTO users (username, user_name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+                ("admin", "admin", "admin@skillstream.com", hashed_password, now_str)
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+                ("admin", "admin@skillstream.com", hashed_password, now_str)
+            )
+
     conn.commit()
     conn.close()
 
 
 def upsert_user(user_id: int, user_name: str) -> None:
+    """Ensures user record exists in database."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT user_id FROM users WHERE user_id = ?",
-        (user_id,),
-    )
+    cursor.execute("PRAGMA table_info(users)")
+    user_cols = [row[1] for row in cursor.fetchall()]
+    now_str = datetime.utcnow().isoformat()
+    
+    cursor.execute("SELECT user_id FROM users WHERE user_id = ? OR username = ?", (user_id, user_name))
     if cursor.fetchone() is None:
-        cursor.execute(
-            "INSERT INTO users (user_id, user_name, created_at) VALUES (?, ?, ?)",
-            (user_id, user_name, datetime.utcnow().isoformat()),
-        )
-    else:
-        cursor.execute(
-            "UPDATE users SET user_name = ? WHERE user_id = ?",
-            (user_name, user_id),
-        )
+        if "user_name" in user_cols:
+            cursor.execute(
+                "INSERT INTO users (user_id, username, user_name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, user_name, user_name, f"{user_name}@skillstream.com", "EXTERNAL_AUTH", now_str),
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO users (user_id, username, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, user_name, f"{user_name}@skillstream.com", "EXTERNAL_AUTH", now_str),
+            )
     conn.commit()
     conn.close()
 

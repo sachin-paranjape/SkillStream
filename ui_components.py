@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+from auth import AuthHandler
 
 def _html(code: str):
     """Cleanly renders raw HTML without multiline Markdown parsing bugs or ghost div leaks."""
@@ -218,13 +219,13 @@ def inject_glassmorphic_css():
     st.markdown(css, unsafe_allow_html=True)
 
 
-def render_login_screen(authenticator):
-    """Renders a clean glassmorphic login screen for unauthorized users."""
+def render_login_screen():
+    """Renders a clean glassmorphic login & registration screen using SQLite AuthHandler."""
     inject_glassmorphic_css()
     
     _html(
         """
-        <div style="max-width: 420px; margin: 40px auto 1.5rem auto; text-align: center;">
+        <div style="max-width: 440px; margin: 30px auto 1.25rem auto; text-align: center;">
             <div style="font-size: 2.8rem; margin-bottom: 0.2rem;">⚡</div>
             <h1 style="margin: 0; font-size: 2.2rem;" class="gradient-text">SkillStream AI</h1>
             <p style="color: #94a3b8; font-size: 0.9rem; margin-top: 0.3rem;">
@@ -234,20 +235,53 @@ def render_login_screen(authenticator):
         """
     )
     
-    col1, col2, col3 = st.columns([1, 2, 1])
+    col1, col2, col3 = st.columns([1, 2.2, 1])
     with col2:
         with st.container(border=True):
-            _html("<h3 style='margin-top:0;'>🔐 Sign In</h3>")
-            st.caption("Enter your credentials to access your adaptive learning session.")
-            try:
-                authenticator.login()
-            except Exception as e:
-                st.error(f"Authentication error: {e}")
+            tab_signin, tab_signup = st.tabs(["🔐 Sign In", "✨ Sign Up"])
+            
+            # --- TAB 1: SIGN IN ---
+            with tab_signin:
+                with st.form("signin_form", clear_on_submit=False):
+                    username_or_email = st.text_input("Username or Email", placeholder="admin")
+                    password = st.text_input("Password", type="password", placeholder="••••••••")
+                    submitted = st.form_submit_button("Sign In", type="primary")
+                    
+                    if submitted:
+                        user_dict, message = AuthHandler.authenticate_user(username_or_email, password)
+                        if user_dict:
+                            st.session_state.authenticated = True
+                            st.session_state.username = user_dict['username']
+                            st.session_state.user_name = user_dict['username']
+                            st.session_state.user_id = user_dict['user_id']
+                            st.success(message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+
+            # --- TAB 2: SIGN UP ---
+            with tab_signup:
+                with st.form("signup_form", clear_on_submit=False):
+                    new_username = st.text_input("Username", placeholder="new_learner")
+                    new_email = st.text_input("Email Address", placeholder="learner@example.com")
+                    new_password = st.text_input("Create Password", type="password", placeholder="••••••••")
+                    confirm_password = st.text_input("Confirm Password", type="password", placeholder="••••••••")
+                    reg_submitted = st.form_submit_button("Create Account", type="primary")
+                    
+                    if reg_submitted:
+                        if new_password != confirm_password:
+                            st.error("Passwords do not match.")
+                        else:
+                            success, message = AuthHandler.register_user(new_username, new_email, new_password)
+                            if success:
+                                st.success(message)
+                            else:
+                                st.error(message)
         
         _html(
             """
             <div style="text-align: center; margin-top: 1.2rem; color: #64748b; font-size: 0.8rem;">
-                SkillStream AI • Adaptive Mastery Platform
+                SkillStream AI • Powered by SQLite & bcrypt Security
             </div>
             """
         )
@@ -274,7 +308,7 @@ def render_header(user_name, current_level=None):
     )
 
 
-def render_sidebar(authenticator, user_name, user_id, base_url):
+def render_sidebar(user_name, user_id, base_url):
     """Renders the sleek sidebar for settings, navigation, topic focus, and live mastery map."""
     _html(
         f"""
@@ -328,7 +362,13 @@ def render_sidebar(authenticator, user_name, user_id, base_url):
 
     st.sidebar.markdown("---")
     
-    authenticator.logout("Logout", "sidebar")
+    if st.sidebar.button("Log Out"):
+        st.session_state.authenticated = False
+        if 'user_name' in st.session_state:
+            del st.session_state['user_name']
+        if 'user_id' in st.session_state:
+            del st.session_state['user_id']
+        st.rerun()
     
     return view_choice, subject_choice, scores
 
@@ -339,7 +379,6 @@ def render_main_challenge_area(user_name, subject_choice, base_url, user_id):
     has_active_result = ('last_result' in st.session_state)
 
     # --- Conditional Challenge Generation Button Card ---
-    # Render ONLY if there is no active question currently loaded
     if not has_active_question and not has_active_result:
         with st.container(border=True):
             _html("<h3 style='margin-top: 0;'>🚀 Adaptive Challenge Hub</h3>")
@@ -479,23 +518,18 @@ def render_main_challenge_area(user_name, subject_choice, base_url, user_id):
                 del st.session_state['last_result']
                 st.rerun()
 
+
 def highlight_current_user(df, current_user_name):
-    """Applies a CSS background to the row matching the current user."""
-    # Create a copy to avoid modifying the original dataframe
-    style_df = df.copy()
-    # Define the style: light blue background
-    highlight = 'background-color: rgba(100, 100, 255, 0.2);'
-    
-    # Create a mask for the rows that match the current user
+    """Applies a CSS background highlight to the row matching the current logged-in user."""
+    highlight = 'background-color: rgba(99, 102, 241, 0.25); font-weight: bold;'
     mask = df['Learner'] == current_user_name
-    
-    # Return a DataFrame of same shape with the style applied
     df_styled = pd.DataFrame('', index=df.index, columns=df.columns)
     df_styled[mask] = highlight
     return df_styled
 
+
 def render_leaderboard(base_url, user_id):
-    """Renders full-width Leaderboard view within the Glassmorphic UI."""
+    """Renders full-width Leaderboard view within the Glassmorphic UI with user row highlight."""
     with st.container(border=True):
         _html("<h2 style='margin-top:0;'>🏆 SkillStream Leaderboard</h2>")
         
@@ -527,8 +561,8 @@ def render_leaderboard(base_url, user_id):
                         df_display = df[['user_name', 'points', 'accuracy', 'attempts']].copy()
                         df_display.columns = ['Learner', 'Points', 'Accuracy (%)', 'Attempts']
                         
-                        # Apply styling based on current user session
-                        current_user = st.session_state.get('user_name', '') 
+                        # Apply row styling for current logged-in user
+                        current_user = st.session_state.get('user_name', '')
                         styled_df = df_display.style.apply(
                             lambda x: highlight_current_user(df_display, current_user), 
                             axis=None
