@@ -1,0 +1,21 @@
+credentials:
+  usernames:
+    admin:
+      email: "admin@skillstream.ai"
+      name: "Alex Vance (Admin)"
+      password: "$2b$12$cP4ovp6cqeFcgIqR08G8R.xDhroqr/ymSUT6uvEfuVatbg6eH37JG"
+    student:
+      email: "student@skillstream.ai"
+      name: "Sam Reader"
+      password: "$2b$12$ehM6DlDU8VZVsiXXLpHpyOWHDhn9Uwx2qohqsbvXIlpw7Ro.yUQIu"
+    demo:
+      email: "demo@skillstream.ai"
+      name: "Jordan Lee"
+      password: "$2b$12$IPF5wjAVN8.iB.xBaEiR.u.7HPEjNPg/bYFj1Xn0/M09pLjD22O4m"
+cookie:
+  expiry_days: 30
+  key: "skillstream_secret_signature_key_2026"
+  name: "skillstream_auth_cookie"
+pre-authorized:
+  emails:
+    - "admin@skillstream.ai"
